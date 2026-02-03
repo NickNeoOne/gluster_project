@@ -1,0 +1,5 @@
+---
+- name: Restart glusterd
+  systemd:
+    name: glusterd
+    state: restarted

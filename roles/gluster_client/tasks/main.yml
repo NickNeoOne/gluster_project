@@ -1,0 +1,35 @@
+---
+# 1. ПОДГОТОВКА КЛИЕНТА
+- name: Установка клиентского пакета GlusterFS (FUSE-клиент)
+  become: yes
+  apt_rpm:
+    name: glusterfs11-client
+    state: present
+
+- name: Создание целевой директории для CommuniGate Pro
+  become: yes
+  file:
+    path: "{{ mount_point }}"
+    state: directory
+    mode: '0755'
+
+# 2. МОНТИРОВАНИЕ СЕТЕВОГО ДИСКА
+- name: Монтирование тома GlusterFS с поддержкой резервного сервера
+  become: yes
+  mount:
+    path: "{{ mount_point }}"
+    # Монтируем на локальный адрес, так как клиент стоит на том же узле
+    src: "{{ inventory_hostname }}:/{{ volume_name }}"
+    fstype: glusterfs
+    # defaults,_netdev — ждать сеть при загрузке
+    # backup-volfile-servers — если локальный glusterd упал, клиент пойдет ко второму узлу
+    opts: "defaults,_netdev,backup-volfile-servers={{ groups['data_nodes'] | reject('equalto', inventory_hostname) | first }}"
+    state: mounted
+  register: mount_res  # Запоминаем результат выполнения
+
+- name: Принудительное выполнение монтирования
+  become: yes
+  ansible.builtin.command: mount -a
+  # Выполняем только если диск еще не примонтирован или были изменения в fstab
+  when: mount_res.changed or mount_res.failed
+  changed_when: false

@@ -1,0 +1,153 @@
+---
+# 1. Проверка диска (Улучшенная защита от потери данных)
+- name: Проверка наличия разделов на диске
+  ansible.builtin.command: parted -s {{ gluster_disk }} print
+  register: disk_info
+  changed_when: false
+  failed_when: false
+
+- name: Проверка наличия файловой системы (blkid)
+  ansible.builtin.command: blkid {{ gluster_disk }}
+  register: blkid_info
+  changed_when: false
+  failed_when: blkid_info.rc != 0 and blkid_info.rc != 2   # ← Только rc=2 считаем нормой
+
+- name: ЗАЩИТА! Прерываем если на диске есть данные
+  ansible.builtin.fail:
+    msg: "ОШИБКА! Диск {{ gluster_disk }} на {{ inventory_hostname }} содержит данные или разделы. Плейбук остановлен."
+  when:
+    - (disk_info.stdout is search('^ [0-9]') or blkid_info.stdout | length > 0)
+    - gluster_disk not in ansible_mounts | map(attribute='device') | list
+
+# 2. Подготовка хранилища
+- name: Установка xfsprogs (обязательно для mkfs.xfs)
+  community.general.apt_rpm:
+    name: xfsprogs
+    state: present
+
+- name: Создание директории монтирования
+  ansible.builtin.file:
+    path: "{{ mount_path_data if inventory_hostname in groups['data_nodes'] else mount_path_arbiter }}"
+    state: directory
+    mode: '0755'
+
+- name: Создание раздела
+  community.general.parted:
+    device: "{{ gluster_disk }}"
+    number: 1
+    state: present
+    part_type: primary
+
+- name: Форматирование раздела в XFS с принудительным перезаписыванием
+  filesystem:
+    fstype: xfs
+    dev: "{{ gluster_disk }}1"
+    force: yes
+
+- name: Монтирование диска и добавление в /etc/fstab
+  ansible.builtin.mount:
+    path: "{{ mount_path_data if inventory_hostname in groups['data_nodes'] else mount_path_arbiter }}"
+    src: "{{ gluster_disk }}1"
+    fstype: xfs
+    state: mounted
+    opts: defaults,noatime
+
+# 3. Установка GlusterFS
+- name: Установка glusterfs11-server
+  community.general.apt_rpm:
+    name: glusterfs11-server
+    state: present
+  notify: Restart glusterd
+
+- name: Запуск и автозагрузка glusterd
+  ansible.builtin.systemd:
+    name: glusterd
+    state: started
+    enabled: yes
+
+# 4. Создание brick директорий
+- name: Создание brick директории (data nodes)
+  ansible.builtin.file:
+    path: "{{ mount_path_data }}/brick"
+    state: directory
+    mode: '0755'
+  when: inventory_hostname in groups['data_nodes']
+
+- name: Создание brick директории (arbiter)
+  ansible.builtin.file:
+    path: "{{ mount_path_arbiter }}/brick"
+    state: directory
+    mode: '0755'
+  when: inventory_hostname in groups['arbiter_node']
+
+# 5. Формирование кластера
+- name: Peer Probe (подключение узлов)
+  ansible.builtin.command: gluster peer probe {{ item }}
+  loop: "{{ groups['gluster_nodes'] | reject('equalto', inventory_hostname) | list }}"
+  run_once: true
+  when: inventory_hostname == groups['gluster_nodes'][0]
+
+# 6. Создание и запуск тома (Replica 2 + Arbiter — ПРАВИЛЬНАЯ КОНФИГУРАЦИЯ)
+
+- name: Список нод
+  debug:
+    msg: "Список нод: {{ groups['gluster_nodes'] }}"
+
+
+- name: "Создание тома (state: present)"
+  gluster.gluster.gluster_volume:
+    name: "{{ volume_name }}"
+    state: present
+    replicas: 3
+    arbiters: 1
+    bricks: "{{ mount_path_data }}/brick"
+#    bricks: '/opt/glusterstorage/brick'
+    cluster: "{{ groups['gluster_nodes'] }}"
+    force: yes
+  run_once: true
+  when: inventory_hostname == groups['gluster_nodes'][0]
+
+- name: "Запуск тома (state: started)"
+  gluster.gluster.gluster_volume:
+    name: "{{ volume_name }}"
+    state: started
+    force: yes
+  run_once: true
+  when: inventory_hostname == groups['gluster_nodes'][0]
+
+# 7. Оптимизация под CommuniGate Pro
+- name: Применение тюнинга производительности
+  ansible.builtin.command: gluster volume set {{ volume_name }} {{ item.key }} {{ item.val }}
+  register: tune_result
+  changed_when: "'option updated' in tune_result.stdout"
+  loop:
+    # Метаданные (Критично для почты)
+    - { key: 'performance.stat-prefetch', val: 'on' }
+    - { key: 'performance.cache-invalidation', val: 'on' }
+    - { key: 'performance.md-cache-timeout', val: '600' }
+    
+    # Сеть и тайминги
+    - { key: 'network.ping-timeout', val: '5' }
+    - { key: 'cluster.quorum-type', val: 'auto' }
+    
+    # Прямой ввод-вывод и оптимизация поиска
+    - { key: 'network.remote-dio', val: 'on' }
+    - { key: 'cluster.lookup-optimize', val: 'on' }
+    
+    # Исправление данных (вместо lock-heal)
+    - { key: 'cluster.data-self-heal-algorithm', val: 'full' }
+
+    # Твои текущие рабочие параметры
+    - { key: 'performance.cache-size', val: '256MB' }
+    - { key: 'performance.io-thread-count', val: '16' }
+    - { key: 'network.inode-lru-limit', val: '200000' }
+  run_once: true
+  when: inventory_hostname == groups['gluster_nodes'][0]
+
+- name: Включение гранулярного заживления (отдельная команда)
+  ansible.builtin.command: "gluster volume heal {{ volume_name }} granular-entry-heal enable"
+  register: heal_result
+  # Чтобы Ansible не считал задачу "измененной" каждый раз, если она уже включена
+  changed_when: "'success' in heal_result.stdout or 'already enabled' in heal_result.stdout"
+  run_once: true
+  when: inventory_hostname == groups['gluster_nodes'][0]

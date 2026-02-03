@@ -1,0 +1,30 @@
+---
+- name: Подготовка всех узлов (Обновление /etc/hosts)
+  hosts: all
+  become: yes
+  pre_tasks:
+
+    - name: Прописываем все узлы в /etc/hosts
+      lineinfile:
+        path: /etc/hosts
+        line: "{{ hostvars[item].ansible_host }} {{ item }}"
+        state: present
+      loop: "{{ groups['gluster_nodes'] }}"
+
+- name: Развертывание GlusterFS серверов
+  hosts: gluster_nodes
+  become: yes
+  roles:
+    - gluster_server
+
+- name: Настройка клиентов (монтирование)
+  hosts: cgp_clients
+  become: yes
+  roles:
+    - gluster_client
+
+- name: Финальная проверка кластера
+  hosts: cgp_clients
+  become: yes
+  roles:
+    - gluster_check

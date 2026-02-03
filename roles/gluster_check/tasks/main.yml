@@ -1,0 +1,57 @@
+---
+- name: Сбор данных о состоянии серверов
+  ansible.builtin.command: "{{ item }}"
+  loop:
+    - "gluster peer status"
+    - "gluster volume status {{ volume_name }}"
+    - "gluster volume heal {{ volume_name }} info"
+  register: gluster_results
+  changed_when: false
+  when: inventory_hostname == groups['gluster_nodes'][0]
+  tags: [check, status]
+
+# ЭТОТ БЛОК ПОКАЖЕТ, ЧТО ВИДИТ ANSIBLE (поможет понять причину ошибки)
+- name: Отладочный вывод текста от GlusterFS
+  ansible.builtin.debug:
+    var: gluster_results.results[1].stdout
+  when: inventory_hostname == groups['gluster_nodes'][0]
+  tags: [check, status]
+
+- name: Проверка монтирования на клиентах
+  ansible.builtin.command: "mountpoint -q {{ mount_point }}"
+  register: mount_check
+  failed_when: false
+  changed_when: false
+  when: inventory_hostname in groups['cgp_clients']
+  tags: [check, status]
+
+# --- БЛОК ВАЛИДАЦИИ ---
+
+- name: ВАЛИДАЦИЯ Состояние здоровья кластера Peer Status
+  ansible.builtin.assert:
+    that:
+      - gluster_results.results[0].rc == 0
+    success_msg: "Команда peer status выполнена успешно."
+    fail_msg: "ОШИБКА Команда gluster peer status завершилась с ошибкой!"
+  when: inventory_hostname == groups['gluster_nodes'][0]
+  tags: [check, status]
+
+- name: ВАЛИДАЦИЯ Статус тома Volume Status
+  ansible.builtin.assert:
+    that:
+      # Проверяем код возврата (0) И ищем Started или Запущен (на случай локализации)
+      - gluster_results.results[1].rc == 0
+      - gluster_results.results[1].stdout is search('Started|Запущен|Online|Y', ignorecase=true)
+    success_msg: "Том {{ volume_name }} активен."
+    fail_msg: "КРИТИЧЕСКАЯ ОШИБКА Том {{ volume_name }} не активен или не найден!"
+  when: inventory_hostname == groups['gluster_nodes'][0]
+  tags: [check, status]
+
+- name: ВАЛИДАЦИЯ Монтирование на клиентах
+  ansible.builtin.assert:
+    that:
+      - mount_check.rc == 0
+    success_msg: "Узел {{ inventory_hostname }} Диск примонтирован."
+    fail_msg: "Узел {{ inventory_hostname }} ОШИБКА Диск НЕ ПРИМОНТИРОВАН!"
+  when: inventory_hostname in groups['cgp_clients']
+  tags: [check, status]

@@ -1,0 +1,9 @@
+---
+# Папка монтирования диска для узлов с данными
+mount_path_data: "/opt/glusterstorage"
+
+# Папка монтирования диска для арбитра (вынесена отдельно для ясности)
+mount_path_arbiter: "/opt/glusterstorage"
+
+# Техническое имя тома GlusterFS
+volume_name: "mail_vol"
