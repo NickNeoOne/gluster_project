@@ -1,5 +1,8 @@
 #!/bin/bash
 
+# Copyright (c) 2026 NickNeo.one
+# SPDX-License-Identifier: MIT
+
 # --- ЦВЕТОВАЯ ПАЛИТРА ---
 YELLOW='\033[1;33m'
 GREEN='\033[0;32m'
