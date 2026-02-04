@@ -268,6 +268,6 @@ gluster_project/
 ```
 
 ## License
-This Ansible project is licensed under the MIT License. See the [LICENSE](../LICENSE) file for details.
+This Ansible project is licensed under the MIT License. See the [LICENSE](/LICENSE) file for details.
 
 Все роли и скрипты в этом репозитории распространяются под той же лицензией.
