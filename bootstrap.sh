@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright (c) 2026 NickNeo.one
+# Copyright (c) 2026 NickNeoOne
 # SPDX-License-Identifier: MIT
 
 # --- ЦВЕТОВАЯ ПАЛИТРА ---
