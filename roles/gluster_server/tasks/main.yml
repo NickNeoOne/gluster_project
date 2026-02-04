@@ -44,10 +44,15 @@
     dev: "{{ gluster_disk }}1"
     force: yes
 
-- name: Монтирование диска и добавление в /etc/fstab
+- name: Получение UUID созданного раздела
+  ansible.builtin.command: blkid -s UUID -o value {{ gluster_disk }}1
+  register: disk_uuid
+  changed_when: false
+
+- name: Монтирование диска и добавление в /etc/fstab по UUID
   ansible.builtin.mount:
     path: "{{ mount_path_data if inventory_hostname in groups['data_nodes'] else mount_path_arbiter }}"
-    src: "{{ gluster_disk }}1"
+    src: "UUID={{ disk_uuid.stdout }}"
     fstype: xfs
     state: mounted
     opts: defaults,noatime
