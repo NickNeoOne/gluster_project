@@ -267,3 +267,7 @@ gluster_project/
     └── gluster_check/  # Сбор и вывод статуса системы
 ```
 
+## License
+This Ansible project is licensed under the MIT License. See the [LICENSE](../LICENSE) file for details.
+
+Все роли и скрипты в этом репозитории распространяются под той же лицензией.
